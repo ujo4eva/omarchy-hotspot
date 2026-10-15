@@ -1,0 +1,15 @@
+  // >>> omarchy-hotspot (added by omarchy-hotspot/install.sh; uninstall.sh removes it)
+  "trigger.toggle.wifi-hotspot": {
+    "icon": "󰖩",
+    "label": "Wi-Fi Hotspot",
+    "when": "[[ \"$(bash ~/.config/omarchy/plugins/ujo4eva.network/hotspot.sh status | awk -F'\\t' '$1==\"ap_capable\"{print $2}')\" == \"1\" ]]",
+    "checked": "[[ \"$(bash ~/.config/omarchy/plugins/ujo4eva.network/hotspot.sh status | awk -F'\\t' '$1==\"active\"{print $2}')\" == \"1\" ]]",
+    "action": "bash ~/.config/omarchy/plugins/ujo4eva.network/hotspot.sh toggle"
+  },
+  "setup.network.hotspot": {
+    "icon": "󰖩",
+    "label": "Wi-Fi Hotspot",
+    "aliases": ["hotspot", "wifi-hotspot"],
+    "action": "omarchy-shell shell call omarchy.network openHotspotSetup \"{}\""
+  },
+  // <<< omarchy-hotspot
