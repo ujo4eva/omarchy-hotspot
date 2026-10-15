@@ -110,6 +110,11 @@ Panel {
   property string hotspotActionKind: ""  // "start" | "stop" | "apply"
   property string hotspotSsid: ""
   property string hotspotPassword: ""
+  // What the NetworkManager profile currently holds, so a field edit can tell
+  // "user changed it" from "user just tabbed through it". Only meaningful once
+  // hotspotLoaded prefill has run; see updateHotspot.
+  property string hotspotSavedSsid: ""
+  property string hotspotSavedPassword: ""
   // Participant cap as a string: "" means unlimited, else "1".."253".
   // Committed to the profile by Apply (DHCP range); the poll echoes it back.
   property string hotspotMaxClients: ""
@@ -976,6 +981,8 @@ Panel {
       hotspotLoaded = true
       if (next.ssid) hotspotSsid = next.ssid
       if (next.password) hotspotPassword = next.password
+      hotspotSavedSsid = hotspotSsid
+      hotspotSavedPassword = hotspotPassword
       var maxClients = Model.hotspotMaxClients(next)
       if (maxClients !== "") hotspotMaxClients = maxClients
       var band = Model.hotspotDefaultBand(next)
@@ -1044,6 +1051,20 @@ Panel {
   function setHotspotSecurity(security) {
     if (hotspotBusy || ["wpa2", "mixed", "wpa3"].indexOf(security) < 0) return
     hotspotSecurity = security
+  }
+
+  // Push edited credentials into the NetworkManager profile once the user
+  // finishes typing, so the AP authenticates what the panel shows. Without
+  // this the field edits stayed local QML state and the profile kept the old
+  // SSID/password, which looks like "my password change didn't take".
+  // Only fires for a genuinely changed value, so navigating between the
+  // fields doesn't spawn a redundant nmcli run on every focus change.
+  function commitHotspotCredentials() {
+    if (hotspotBusy) return
+    if (!hotspotSetupOpen) return
+    if (hotspotSsid.trim() === "") return
+    if (hotspotPassword === hotspotSavedPassword && hotspotSsid === hotspotSavedSsid) return
+    applyHotspot()
   }
 
   function applyHotspot() {
@@ -1281,7 +1302,14 @@ Panel {
       waitForEnd: true
       onStreamFinished: {
         var pw = String(text || "").replace(/\s+/g, "").trim()
-        if (pw !== "") root.hotspotPassword = pw
+        if (pw !== "") {
+          root.hotspotPassword = pw
+          // A generated key must reach NetworkManager too, otherwise the AP
+          // keeps the previous passphrase and clients fail to authenticate.
+          Qt.callLater(function() {
+            if (root.hotspotSsid.trim() !== "") root.applyHotspot()
+          })
+        }
       }
     }
   }
@@ -1313,6 +1341,13 @@ Panel {
         })
       }
       root.hotspotActionKind = ""
+      // The profile now holds the values we pushed, so a later blur won't
+      // re-run apply. Leaving the markers untouched on failure keeps a retry
+      // armed for the next edit commit.
+      if (exitCode === 0) {
+        root.hotspotSavedSsid = root.hotspotSsid
+        root.hotspotSavedPassword = root.hotspotPassword
+      }
       Qt.callLater(function() {
         root.refreshHotspot()
         root.refresh()
@@ -2141,6 +2176,11 @@ Panel {
             verticalPadding: Style.spacing.controlPaddingY
             text: root.hotspotSsid
             onTextChanged: if (text !== root.hotspotSsid) root.hotspotSsid = text
+            // Credentials reach NetworkManager when editing finishes, not on
+            // every keystroke: the field is disabled while an apply runs, so
+            // per-character commits would yank focus out from under the typist.
+            onAccepted: root.commitHotspotCredentials()
+            onActiveFocusChanged: if (!activeFocus) root.commitHotspotCredentials()
           }
 
           Row {
@@ -2158,8 +2198,10 @@ Panel {
               foreground: root.bar.foreground
               horizontalPadding: Style.spacing.controlGap
               verticalPadding: Style.spacing.controlPaddingY
-text: root.hotspotPassword
+              text: root.hotspotPassword
               onTextChanged: if (text !== root.hotspotPassword) root.hotspotPassword = text
+              onAccepted: root.commitHotspotCredentials()
+              onActiveFocusChanged: if (!activeFocus) root.commitHotspotCredentials()
             }
 
             Button {
