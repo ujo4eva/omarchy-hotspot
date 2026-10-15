@@ -502,6 +502,8 @@ ensure_ipv4_forwarding() {
 start() {
   local ssid=$1 band=${2:-2.4} max=${3:-} security=${4:-}
 
+  command -v dnsmasq >/dev/null 2>&1 ||
+    fail "dnsmasq is required for hotspot DHCP (sudo pacman -S dnsmasq)"
   ensure_ipv4_forwarding
   apply "$ssid" "$band" "$max" "$security"
 
@@ -615,7 +617,8 @@ apply() {
   else
     nmcli connection add type wifi ifname "$device" con-name "$PROFILE" ssid "$ssid" \
       mode ap 802-11-wireless.band "$nm_band" 802-11-wireless.channel "$nm_channel" \
-      "${security_args[@]}" ipv4.method shared autoconnect no >/dev/null ||
+      "${security_args[@]}" ipv4.method shared ipv4.addresses 10.42.0.1/24 \
+      autoconnect no >/dev/null ||
       fail "could not create hotspot profile"
     printf 'set wifi-sec.psk %s\nsave\nquit\n' "$password" |
       nmcli connection edit "$PROFILE" >/dev/null 2>&1 ||
