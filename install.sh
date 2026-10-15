@@ -23,6 +23,11 @@ if ! need iw; then
   sudo pacman -S --needed iw
 fi
 
+if ! need dnsmasq; then
+  say "Installing dnsmasq (NetworkManager's shared mode needs it for DHCP)"
+  sudo pacman -S --needed dnsmasq
+fi
+
 # Capture first: under pipefail, grep -q exiting early SIGPIPEs iw and fails the pipe.
 phy_info=$(iw phy 2>/dev/null || true)
 if ! grep -Eq '^[[:space:]]*\*[[:space:]]*AP[[:space:]]*$' <<<"$phy_info"; then
