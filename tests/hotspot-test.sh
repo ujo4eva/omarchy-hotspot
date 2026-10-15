@@ -227,3 +227,26 @@ if (hotspotBands({}).join(",") !== "2.4,5") {
 }
 ' "${PLUGIN%/*}/Model.js"
 printf 'PASS: hotspot status reports AP bands and Model.js picks 2.4/5\n'
+
+# Regression: with pipefail, `iw phy | grep -q` fails when grep exits on the
+# first match and iw is still writing. Emit the AP line early, then far more
+# than a pipe buffer, so the old pipeline loses the race every time.
+iw() {
+  if [[ ${1:-} == phy ]]; then
+    printf '%s\n' 'Wiphy phy0' '        Supported interface modes:' '                 * AP'
+    local i
+    for ((i = 0; i < 20000; i++)); do
+      echo '                        * 2412.0 MHz [1] (22.0 dBm) padding padding'
+    done
+    return 0
+  fi
+  return 0
+}
+export -f iw
+capable=$(XDG_RUNTIME_DIR="$STATE_DIR/runtime" bash "$PLUGIN" status 2>/dev/null |
+  awk -F'\t' '$1 == "ap_capable" { print $2 }')
+if [[ $capable != 1 ]]; then
+  printf 'FAIL: ap_capable missed AP mode in long iw phy output (got %s)\n' "${capable:-nothing}" >&2
+  exit 1
+fi
+printf 'PASS: ap_capable survives iw phy output larger than a pipe buffer\n'

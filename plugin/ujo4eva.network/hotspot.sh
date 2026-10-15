@@ -90,12 +90,20 @@ nm_channel_for() {
   esac
 }
 
-# Any wireless PHY that can run AP mode? `iw phy` rarely hiccups while the
-# radio rescans, so one retry keeps a single bad poll from blanking the panel.
+# Any wireless PHY that can run AP mode? Capture `iw phy` before matching:
+# piping it into grep -q under pipefail fails whenever grep exits on the first
+# match and iw dies of SIGPIPE writing the rest. One retry still covers a
+# genuine bad poll while the radio rescans.
+phy_has_ap() {
+  local info
+  info=$(iw phy 2>/dev/null) || true
+  grep -Eq '^[[:space:]]*\*[[:space:]]*AP[[:space:]]*$' <<<"$info"
+}
+
 ap_capable() {
-  iw phy 2>/dev/null | grep -Eq '^[[:space:]]*\*[[:space:]]*AP[[:space:]]*$' && return 0
+  phy_has_ap && return 0
   sleep 0.05
-  iw phy 2>/dev/null | grep -Eq '^[[:space:]]*\*[[:space:]]*AP[[:space:]]*$'
+  phy_has_ap
 }
 
 first_wifi_device() {
