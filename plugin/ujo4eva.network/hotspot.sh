@@ -3,7 +3,7 @@
 # omarchy:summary=Manage a Wi-Fi access point (hotspot) that shares the machine's internet
 # omarchy:group=network
 # omarchy:args=<status|start|stop|toggle|qr|apply|alias-set|alias-remove|generate-password>
-# omarchy:examples=hotspot.sh status | hotspot.sh toggle | hotspot.sh apply MyWifi 2.4 5 | hotspot.sh start MyWifi 2.4 unlimited
+# omarchy:examples=hotspot.sh status | hotspot.sh toggle | hotspot.sh apply MyWifi 2.4 5 wpa3 | hotspot.sh start MyWifi 2.4 unlimited
 
 # User-owned companion script for the cloned omarchy.network panel
 # (ujo4eva.network). Drives NetworkManager's shared-mode AP profile so other
@@ -37,6 +37,20 @@ band_from_nm() {
     a) echo "5" ;;
     6GHz) echo "6" ;;
     *) echo "2.4" ;;
+  esac
+}
+
+# NetworkManager quietly turns a plain wpa-psk AP into WPA2/WPA3 transition
+# mode (it adds SAE) whenever the card supports SAE. Some older Android
+# clients then upgrade to SAE, fail before associating, and never show up in
+# the AP's log. So the security is explicit: "wpa2" pins PSK by disabling PMF
+# (SAE cannot run without it); "wpa3" is SAE only, for owners whose devices
+# all support it.
+nm_security_args() {
+  case "$1" in
+    wpa2) echo "wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable" ;;
+    wpa3) echo "wifi-sec.key-mgmt sae wifi-sec.pmf required" ;;
+    *) return 1 ;;
   esac
 }
 
@@ -160,6 +174,15 @@ profile_ssid() {
 
 profile_band() {
   band_from_nm "$(nm_get 802-11-wireless.band connection show "$PROFILE")"
+}
+
+# Anything but SAE reads as wpa2, including an older profile still in
+# transition mode; the next apply pins it.
+profile_security() {
+  case "$(nm_get 802-11-wireless-security.key-mgmt connection show "$PROFILE")" in
+    sae) echo "wpa3" ;;
+    *) echo "wpa2" ;;
+  esac
 }
 
 profile_secret() {
@@ -380,7 +403,7 @@ station_list() {
 }
 
 status() {
-  local capable=0 active=0 configured=0 iface ssid band password freq ip clients upstream max_clients
+  local capable=0 active=0 configured=0 iface ssid band password freq ip clients upstream max_clients security
   local client_list client_count
 
   if ap_capable; then capable=1; fi
@@ -409,6 +432,7 @@ status() {
   band=$(profile_band)
   password=$(profile_secret)
   max_clients=$(profile_max_clients)
+  security=$(profile_security)
 
   if ((active)) && [[ -n $iface ]]; then
     freq=$(iw dev "$iface" link 2>/dev/null | awk '/freq:/ { print $2; exit }')
@@ -432,6 +456,7 @@ status() {
   printf 'ap_bands\t%s\n' "$(ap_bands)"
   printf 'password\t%s\n' "$password"
   printf 'max_clients\t%s\n' "$max_clients"
+  printf 'security\t%s\n' "$security"
   printf 'freq\t%s\n' "$freq"
   printf 'ip\t%s\n' "$ip"
   printf 'client_count\t%d\n' "$client_count"
@@ -457,12 +482,13 @@ ensure_ipv4_forwarding() {
 
 # Password arrives on stdin (never argv). band is optional, default 2.4.
 # max is optional: "unlimited"/empty clears the participant limit, else 1-253.
+# security is optional: wpa2/wpa3, empty keeps the profile's (wpa2 when new).
 # apply() writes the profile; start() writes it the same way, then brings the AP up.
 start() {
-  local ssid=$1 band=${2:-2.4} max=${3:-}
+  local ssid=$1 band=${2:-2.4} max=${3:-} security=${4:-}
 
   ensure_ipv4_forwarding
-  apply "$ssid" "$band" "$max"
+  apply "$ssid" "$band" "$max" "$security"
 
   if ! nmcli connection up "$PROFILE" >/dev/null 2>&1; then
     fail "could not start hotspot (does this adapter allow AP mode?)"
@@ -487,7 +513,7 @@ toggle() {
     password=$(profile_secret)
     [[ -n $ssid ]] || fail "no hotspot SSID configured"
     [[ -n $password ]] || fail "no saved hotspot password"
-    printf '%s\n' "$password" | start "$ssid" "$band"
+    printf '%s\n' "$password" | start "$ssid" "$band" "$(profile_max_clients)"
   else
     omarchy-shell shell summon ujo4eva.network '{"focus":"hotspot"}' 2>/dev/null || true
   fi
@@ -533,8 +559,9 @@ qr() {
 # limit bounces a live AP so dnsmasq picks it up now; SSID/password edits
 # still wait for the next manual start.
 apply() {
-  local ssid=$1 band=${2:-2.4} max=${3:-} password device nm_band nm_channel
-  local old_range old_band new_range="" base="" bounce=0
+  local ssid=$1 band=${2:-2.4} max=${3:-} security=${4:-} password device nm_band nm_channel
+  local old_range old_band old_security new_range="" base="" bounce=0
+  local -a security_args
 
   ap_capable || fail "no Wi-Fi adapter supports AP mode"
   device=$(first_wifi_device)
@@ -548,6 +575,10 @@ apply() {
   nm_channel=$(nm_channel_for "$band")
   old_range=$(nm_get ipv4.shared-dhcp-range connection show "$PROFILE")
   old_band=$(profile_band)
+  old_security=$(profile_security)
+  [[ -n $security ]] || security=$old_security
+  read -ra security_args <<<"$(nm_security_args "$security")"
+  ((${#security_args[@]})) || fail "unknown security '$security' (use wpa2 or wpa3)"
   if [[ -n $max && $max != "unlimited" ]]; then
     new_range=$(dhcp_range_for "$max")
     base=$(shared_base)
@@ -560,7 +591,8 @@ apply() {
     # channel or width belongs to another band (2.4 GHz with channel 149 or an
     # 80 MHz width), so the width goes back to auto for the new band.
     nmcli connection modify "$PROFILE" ssid "$ssid" 802-11-wireless.band "$nm_band" \
-      802-11-wireless.channel "$nm_channel" 802-11-wireless.channel-width auto >/dev/null 2>&1 ||
+      802-11-wireless.channel "$nm_channel" 802-11-wireless.channel-width auto \
+      "${security_args[@]}" >/dev/null 2>&1 ||
       fail "could not apply hotspot settings"
     printf 'set wifi-sec.psk %s\nsave\nquit\n' "$password" |
       nmcli connection edit "$PROFILE" >/dev/null 2>&1 ||
@@ -568,7 +600,7 @@ apply() {
   else
     nmcli connection add type wifi ifname "$device" con-name "$PROFILE" ssid "$ssid" \
       mode ap 802-11-wireless.band "$nm_band" 802-11-wireless.channel "$nm_channel" \
-      wifi-sec.key-mgmt wpa-psk ipv4.method shared autoconnect no >/dev/null ||
+      "${security_args[@]}" ipv4.method shared autoconnect no >/dev/null ||
       fail "could not create hotspot profile"
     printf 'set wifi-sec.psk %s\nsave\nquit\n' "$password" |
       nmcli connection edit "$PROFILE" >/dev/null 2>&1 ||
@@ -592,9 +624,10 @@ apply() {
     fi
     bounce=1
   fi
-  # A band change is as live as a limit change: the AP keeps the old channel
-  # until it is bounced. SSID/password still wait for the next manual start.
-  if [[ $band != "$old_band" ]]; then
+  # A band or security change is as live as a limit change: the AP keeps the
+  # old channel and key management until it is bounced. SSID/password still
+  # wait for the next manual start.
+  if [[ $band != "$old_band" || $security != "$old_security" ]]; then
     bounce=1
   fi
   if ((bounce)) && profile_active; then

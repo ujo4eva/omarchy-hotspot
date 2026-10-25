@@ -41,7 +41,11 @@ iw() {
 }
 
 nmcli() {
+  printf '%s\n' "$*" >>"$STATE_DIR/nmcli-calls"
   case " $* " in
+    *" -g 802-11-wireless-security.key-mgmt connection show "*)
+      cat "$STATE_DIR/key-mgmt" 2>/dev/null || true
+      ;;
     *" -g NAME connection show "*)
       printf '%s\n' ujo4eva-hotspot
       ;;
@@ -119,6 +123,49 @@ if [[ $forwarding != 1 ]]; then
   exit 1
 fi
 printf 'PASS: hotspot start enables IPv4 forwarding\n'
+
+# NetworkManager adds SAE to a bare wpa-psk AP; the default must pin WPA2 by
+# disabling PMF, or SAE-fumbling clients never reach the AP.
+if ! grep -q 'connection modify .*wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable' "$STATE_DIR/nmcli-calls"; then
+  printf 'FAIL: hotspot start did not pin WPA2 (PSK, PMF disabled) by default\n' >&2
+  exit 1
+fi
+printf 'sae\n' >"$STATE_DIR/key-mgmt"
+: >"$STATE_DIR/nmcli-calls"
+printf '%s\n' test-password | bash "$PLUGIN" apply TestHotspot 2.4 unlimited
+if ! grep -q 'connection modify .*wifi-sec.key-mgmt sae wifi-sec.pmf required' "$STATE_DIR/nmcli-calls"; then
+  printf 'FAIL: hotspot apply without a security argument dropped the saved WPA3\n' >&2
+  exit 1
+fi
+if ! XDG_RUNTIME_DIR="$STATE_DIR/runtime" bash "$PLUGIN" status | grep -qx $'security\twpa3'; then
+  printf 'FAIL: hotspot status did not report WPA3 for an SAE profile\n' >&2
+  exit 1
+fi
+: >"$STATE_DIR/nmcli-calls"
+printf '%s\n' test-password | bash "$PLUGIN" apply TestHotspot 2.4 unlimited wpa2
+if ! grep -q 'connection modify .*wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable' "$STATE_DIR/nmcli-calls"; then
+  printf 'FAIL: hotspot apply wpa2 did not switch the profile back to PSK\n' >&2
+  exit 1
+fi
+if ! grep -qx 'connection up ujo4eva-hotspot' "$STATE_DIR/nmcli-calls"; then
+  printf 'FAIL: a security change did not bounce the live hotspot\n' >&2
+  exit 1
+fi
+rm -f "$STATE_DIR/key-mgmt"
+if printf '%s\n' test-password | bash "$PLUGIN" apply TestHotspot 2.4 unlimited wep >/dev/null 2>&1; then
+  printf 'FAIL: hotspot accepted an unknown security mode\n' >&2
+  exit 1
+fi
+node -e '
+const fs = require("fs")
+const vm = require("vm")
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"))
+if (hotspotSecurity({ security: "wpa3" }) !== "wpa3" || hotspotSecurity({ security: "" }) !== "wpa2" || hotspotSecurity({}) !== "wpa2") {
+  process.stderr.write("FAIL: hotspotSecurity did not normalize to wpa2/wpa3\n")
+  process.exit(1)
+}
+' "${PLUGIN%/*}/Model.js"
+printf 'PASS: hotspot security defaults to WPA2, keeps a saved WPA3, and switches live\n'
 
 status_output=$(XDG_RUNTIME_DIR="$STATE_DIR/runtime" bash "$PLUGIN" status)
 node -e '

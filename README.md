@@ -41,9 +41,9 @@ git pull && ./install.sh
 ## Use
 
 Click the network icon in the bar and open the hotspot section. Set a network
-name and a password, or generate one, and pick a band. Then turn it on. The
-panel shows a QR code people can scan to join, plus the list of connected
-devices, which you can give names.
+name and a password, or generate one, and pick a band and security. Then
+turn it on. The panel shows a QR code people can scan to join, plus the list
+of connected devices, which you can give names.
 
 You can also toggle it from **Omarchy menu > Trigger > Toggle > Wi-Fi Hotspot**,
 or from a terminal:
@@ -52,6 +52,11 @@ or from a terminal:
 ~/.config/omarchy/plugins/ujo4eva.network/hotspot.sh status
 ~/.config/omarchy/plugins/ujo4eva.network/hotspot.sh toggle
 ```
+
+Security defaults to WPA2, which every device can join. Pick WPA3 if all your
+devices support it: it's stronger, but older phones and tablets can't connect.
+There's no mixed WPA2/WPA3 mode on purpose, because some older Android devices
+try WPA3 in that mode, fail, and never connect.
 
 Most Wi-Fi cards can't host a hotspot while they're also connected to another
 Wi-Fi network on a different channel. It's most reliable when your internet

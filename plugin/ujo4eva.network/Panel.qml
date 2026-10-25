@@ -116,6 +116,9 @@ Panel {
   // AP band written by Apply / Start. Prefills from the saved profile so a
   // 5 GHz hotspot is not silently rewritten to 2.4 on the next apply.
   property string hotspotBand: "2.4"
+  // AP security written by Apply / Start: "wpa2" or "wpa3". Prefills from the
+  // saved profile so a WPA3 hotspot is not quietly downgraded on the next apply.
+  property string hotspotSecurity: "wpa2"
   property string hotspotError: ""
   property string hotspotEditingMac: ""
   property string hotspotAliasDraft: ""
@@ -976,6 +979,7 @@ Panel {
       if (maxClients !== "") hotspotMaxClients = maxClients
       var band = Model.hotspotDefaultBand(next)
       if (band !== "") hotspotBand = band
+      hotspotSecurity = Model.hotspotSecurity(next)
     }
     var bands = Model.hotspotBands(next)
     if (String(hotspotAvailableBands) !== String(bands)) hotspotAvailableBands = bands
@@ -995,7 +999,7 @@ Panel {
     hotspotBusy = true
     hotspotError = ""
     hotspotActionProc.secret = hotspotPassword
-    hotspotActionProc.command = ["bash", hotspotScript, "start", hotspotSsid.trim(), hotspotBand, hotspotMaxClients === "" ? "unlimited" : hotspotMaxClients]
+    hotspotActionProc.command = ["bash", hotspotScript, "start", hotspotSsid.trim(), hotspotBand, hotspotMaxClients === "" ? "unlimited" : hotspotMaxClients, hotspotSecurity]
     hotspotActionProc.running = true
   }
 
@@ -1036,6 +1040,11 @@ Panel {
     hotspotBand = band
   }
 
+  function setHotspotSecurity(security) {
+    if (hotspotBusy || (security !== "wpa2" && security !== "wpa3")) return
+    hotspotSecurity = security
+  }
+
   function applyHotspot() {
     if (hotspotBusy) return
     var err = Model.hotspotCredentialsError(hotspotSsid, hotspotPassword)
@@ -1045,7 +1054,7 @@ Panel {
     hotspotBusy = true
     hotspotError = ""
     hotspotActionProc.secret = hotspotPassword
-    hotspotActionProc.command = ["bash", hotspotScript, "apply", hotspotSsid.trim(), hotspotBand, hotspotMaxClients === "" ? "unlimited" : hotspotMaxClients]
+    hotspotActionProc.command = ["bash", hotspotScript, "apply", hotspotSsid.trim(), hotspotBand, hotspotMaxClients === "" ? "unlimited" : hotspotMaxClients, hotspotSecurity]
     hotspotActionProc.running = true
   }
 
@@ -2230,6 +2239,33 @@ text: root.hotspotPassword
             }
           }
 
+          // Key management, committed by Apply alongside the band. WPA2 keeps
+          // every client able to join; WPA3 is SAE only.
+          Item {
+            width: parent.width
+            implicitHeight: Math.max(hotspotSecurityLabel.implicitHeight, hotspotSecurityRow.implicitHeight)
+
+            Text {
+              id: hotspotSecurityLabel
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Security"
+              color: root.bar.foreground
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.body
+            }
+
+            Row {
+              id: hotspotSecurityRow
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(6)
+
+              HotspotSecurityPill { security: "wpa2" }
+              HotspotSecurityPill { security: "wpa3" }
+            }
+          }
+
           // Participant cap: how many DHCP leases the hotspot hands out.
           // Devices past the cap associate but get no address. Committed by
           // Apply alongside the credentials; empty means unlimited.
@@ -2571,6 +2607,24 @@ delegate: Item {
     active: root.hotspotBand === band
 
     onClicked: root.setHotspotBand(band)
+  }
+
+  component HotspotSecurityPill: Button {
+    required property string security
+
+    text: Model.hotspotSecurityLabel(security)
+    tooltipText: Model.hotspotSecurityTooltip(security)
+    fontSize: Style.font.bodySmall
+    foreground: root.bar.foreground
+    fontFamily: root.bar.fontFamily
+    horizontalPadding: Style.spacing.controlPaddingX
+    verticalPadding: Style.spacing.controlPaddingY + Style.space(2)
+    bordered: true
+    enabled: !root.hotspotBusy
+
+    active: root.hotspotSecurity === security
+
+    onClicked: root.setHotspotSecurity(security)
   }
 
   component DnsProviderPill: Button {
