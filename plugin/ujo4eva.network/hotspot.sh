@@ -134,11 +134,15 @@ wifi_devices() {
     awk -F: '$2 == "wifi" && $1 !~ /^p2p-dev-/ { print $1 }'
 }
 
+# Capture and test the output rather than `grep -q`: under pipefail an early
+# grep exit can SIGPIPE nmcli and fail the check (see phy_has_ap).
 profile_configured() {
+  # shellcheck disable=SC2143
   [[ -n $(nm_get NAME connection show 2>/dev/null | grep -x "$PROFILE") ]]
 }
 
 profile_active() {
+  # shellcheck disable=SC2143
   [[ -n $(LC_ALL=C nmcli -t -f NAME connection show --active 2>/dev/null | grep -x "$PROFILE") ]]
 }
 
@@ -238,8 +242,9 @@ shared_base() {
 # (.1 is the gateway). Users beyond the Nth associate but get no address.
 dhcp_range_for() {
   local n=$1 base
-  [[ $n =~ ^[0-9]+$ ]] && ((n >= 1 && n <= 253)) ||
+  if ! [[ $n =~ ^[0-9]+$ ]] || ((n < 1 || n > 253)); then
     fail "participant limit must be 1-253"
+  fi
   base=$(shared_base)
   echo "$base.2,$base.$((n + 1))"
 }
@@ -361,8 +366,8 @@ station_list() {
     [[ -n ${client_hostnames["${mac,,}"]:-} ]] || needs_refresh=1
   done <<<"$block"
   if ((needs_refresh)) && command -v journalctl >/dev/null 2>&1; then
-    local timestamp event lease_ip lease_mac lease_hostname lease_key
-    while read -r timestamp event lease_ip lease_mac lease_hostname; do
+    local event lease_ip lease_mac lease_hostname lease_key
+    while read -r _ event lease_ip lease_mac lease_hostname; do
       [[ $event == "DHCPACK($iface)" && -n $lease_ip && -n $lease_mac ]] || continue
       lease_key=${lease_mac,,}
       client_ips["$lease_key"]=$lease_ip
@@ -372,9 +377,9 @@ station_list() {
     done < <(journalctl -b -o cat _COMM=dnsmasq --grep=DHCPACK --no-pager 2>/dev/null)
     local needs_service_lookup=0
     local -A service_macs=()
-    local lookup_row lookup_mac lookup_ip
+    local lookup_row lookup_mac
     for lookup_row in "${station_rows[@]}"; do
-      IFS=$'\t' read -r lookup_mac lookup_ip <<<"$lookup_row"
+      IFS=$'\t' read -r lookup_mac _ <<<"$lookup_row"
       lookup_mac=${lookup_mac,,}
       if [[ -z ${client_hostnames["$lookup_mac"]:-} && -n ${client_ips["$lookup_mac"]:-} ]]; then
         service_macs["${client_ips["$lookup_mac"]}"]=$lookup_mac
@@ -382,8 +387,8 @@ station_list() {
       fi
     done
     if ((needs_service_lookup)) && command -v avahi-browse >/dev/null 2>&1; then
-      local record browse_iface protocol service_name service_type domain mdns_hostname service_ip port remainder station_mac
-      while IFS=';' read -r record browse_iface protocol service_name service_type domain mdns_hostname service_ip port remainder; do
+      local record protocol service_type mdns_hostname service_ip station_mac
+      while IFS=';' read -r record _ protocol _ service_type _ mdns_hostname service_ip _; do
         [[ $record == "=" && $protocol == "IPv4" && $service_type == "_rdlink._tcp" ]] || continue
         station_mac=${service_macs["$service_ip"]:-}
         [[ -n $station_mac && -n $mdns_hostname ]] || continue
@@ -554,7 +559,7 @@ qr() {
   while IFS= read -r line; do
     row=
     for ((column = 0; column < ${#line}; column += 2)); do
-      [[ ${line:column:2} == *#* ]] && row+=1 || row+=0
+      [[ ${line:column:2} == *#* ]] && row+='1' || row+='0'
     done
     printf '%s\n' "$row"
   done <<<"$ascii"

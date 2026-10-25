@@ -8,6 +8,8 @@ printf '0\n' >"$STATE_DIR/ip-forward"
 mkdir -p "$STATE_DIR/runtime"
 export STATE_DIR
 
+# The mocks reach the plugin through `export -f` below.
+# shellcheck disable=SC2329
 iw() {
   case ${1:-} in
     phy)
