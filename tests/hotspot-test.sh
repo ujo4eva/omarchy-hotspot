@@ -46,6 +46,9 @@ nmcli() {
     *" -g 802-11-wireless-security.key-mgmt connection show "*)
       cat "$STATE_DIR/key-mgmt" 2>/dev/null || true
       ;;
+    *" -g 802-11-wireless-security.pmf connection show "*)
+      cat "$STATE_DIR/pmf" 2>/dev/null || true
+      ;;
     *" -g NAME connection show "*)
       printf '%s\n' ujo4eva-hotspot
       ;;
@@ -124,13 +127,25 @@ if [[ $forwarding != 1 ]]; then
 fi
 printf 'PASS: hotspot start enables IPv4 forwarding\n'
 
-# NetworkManager adds SAE to a bare wpa-psk AP; the default must pin WPA2 by
-# disabling PMF, or SAE-fumbling clients never reach the AP. Both modes pin
-# RSN/CCMP: an SAE-only AP will not start without them.
-if ! grep -q 'connection modify .*wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp' "$STATE_DIR/nmcli-calls"; then
-  printf 'FAIL: hotspot start did not pin WPA2 (PSK, PMF disabled) by default\n' >&2
+# Every mode pins RSN/CCMP: unpinned, the AP picks a TKIP group cipher that
+# Android's auto-upgraded WPA3 profile rejects, and an SAE-only AP will not
+# start. A profile with no saved security gets the mixed WPA2/WPA3 default.
+if ! grep -q 'connection modify .*wifi-sec.key-mgmt wpa-psk wifi-sec.pmf optional wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp' "$STATE_DIR/nmcli-calls"; then
+  printf 'FAIL: hotspot start did not default to mixed WPA2/WPA3 with CCMP pinned\n' >&2
   exit 1
 fi
+printf 'wpa-psk\n' >"$STATE_DIR/key-mgmt"
+printf '1\n' >"$STATE_DIR/pmf"
+if ! XDG_RUNTIME_DIR="$STATE_DIR/runtime" bash "$PLUGIN" status | grep -qx $'security\twpa2'; then
+  printf 'FAIL: hotspot status did not report WPA2 for PSK with PMF disabled\n' >&2
+  exit 1
+fi
+printf '0\n' >"$STATE_DIR/pmf"
+if ! XDG_RUNTIME_DIR="$STATE_DIR/runtime" bash "$PLUGIN" status | grep -qx $'security\tmixed'; then
+  printf 'FAIL: hotspot status did not report mixed for PSK with PMF allowed\n' >&2
+  exit 1
+fi
+rm -f "$STATE_DIR/pmf"
 printf 'sae\n' >"$STATE_DIR/key-mgmt"
 : >"$STATE_DIR/nmcli-calls"
 printf '%s\n' test-password | bash "$PLUGIN" apply TestHotspot 2.4 unlimited
@@ -161,12 +176,13 @@ node -e '
 const fs = require("fs")
 const vm = require("vm")
 vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"))
-if (hotspotSecurity({ security: "wpa3" }) !== "wpa3" || hotspotSecurity({ security: "" }) !== "wpa2" || hotspotSecurity({}) !== "wpa2") {
-  process.stderr.write("FAIL: hotspotSecurity did not normalize to wpa2/wpa3\n")
+if (hotspotSecurity({ security: "wpa3" }) !== "wpa3" || hotspotSecurity({ security: "wpa2" }) !== "wpa2" ||
+    hotspotSecurity({ security: "" }) !== "mixed" || hotspotSecurity({}) !== "mixed") {
+  process.stderr.write("FAIL: hotspotSecurity did not normalize to wpa2/mixed/wpa3\n")
   process.exit(1)
 }
 ' "${PLUGIN%/*}/Model.js"
-printf 'PASS: hotspot security defaults to WPA2, keeps a saved WPA3, and switches live\n'
+printf 'PASS: hotspot security defaults to mixed, reads and keeps the saved mode, and switches live\n'
 
 status_output=$(XDG_RUNTIME_DIR="$STATE_DIR/runtime" bash "$PLUGIN" status)
 node -e '

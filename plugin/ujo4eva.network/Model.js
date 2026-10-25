@@ -531,21 +531,25 @@ function hotspotDefaultBand(status) {
   return bands[0] || "2.4"
 }
 
-// AP security from hotspot.sh status: "wpa2" (PSK only, the default: every
-// client can join) or "wpa3" (SAE only: stronger, but older clients can't).
-// Anything unrecognised reads as wpa2, matching what the script reports.
+// AP security from hotspot.sh status: "wpa2" (PSK only), "mixed" (WPA2/WPA3
+// transition, the default: WPA3 where the client supports it) or "wpa3" (SAE
+// only: strongest, but older clients can't join). Anything unrecognised reads
+// as mixed, matching what the script reports for a new profile.
 function hotspotSecurity(status) {
-  return status && status.security === "wpa3" ? "wpa3" : "wpa2"
+  var value = status && status.security
+  return value === "wpa2" || value === "wpa3" ? value : "mixed"
 }
 
 function hotspotSecurityLabel(security) {
-  return security === "wpa3" ? "WPA3" : "WPA2"
+  if (security === "wpa2") return "WPA2"
+  if (security === "wpa3") return "WPA3"
+  return "WPA2/WPA3"
 }
 
 function hotspotSecurityTooltip(security) {
-  return security === "wpa3"
-    ? "WPA3 only: stronger, but older devices can't join"
-    : "WPA2: works with every device"
+  if (security === "wpa2") return "WPA2 only: for devices that struggle with WPA3"
+  if (security === "wpa3") return "WPA3 only: strongest, but older devices can't join"
+  return "WPA2/WPA3: WPA3 where supported, WPA2 for older devices"
 }
 
 function hotspotClients(status) {

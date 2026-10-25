@@ -40,18 +40,19 @@ band_from_nm() {
   esac
 }
 
-# NetworkManager quietly turns a plain wpa-psk AP into WPA2/WPA3 transition
-# mode (it adds SAE) whenever the card supports SAE. Some older Android
-# clients then upgrade to SAE, fail before associating, and never show up in
-# the AP's log. So the security is explicit: "wpa2" pins PSK by disabling PMF
-# (SAE cannot run without it); "wpa3" is SAE only, for owners whose devices
-# all support it. Protocol and ciphers are pinned to RSN/CCMP: without them
-# wpa_supplicant's AP mode cannot build the beacon's RSN element for SAE alone
-# ("Could not generate WPA IE") and NetworkManager times out.
+# Security modes. "mixed" is a wpa-psk AP with optional PMF, which
+# NetworkManager turns into WPA2/WPA3 transition mode (it adds SAE) when the
+# card supports it: WPA3 clients use SAE, older ones fall back to PSK. "wpa2"
+# pins PSK by disabling PMF (SAE cannot run without it); "wpa3" is SAE only.
+# Every mode pins RSN/CCMP. Left unpinned, wpa_supplicant also offers TKIP and
+# then picks TKIP as the group cipher; Android's auto-upgraded WPA3 profile
+# rejects a TKIP group, so such clients never even try to associate. And an
+# SAE-only AP will not start at all without them ("Could not generate WPA IE").
 nm_security_args() {
   local ciphers="wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp"
   case "$1" in
     wpa2) echo "wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable $ciphers" ;;
+    mixed) echo "wifi-sec.key-mgmt wpa-psk wifi-sec.pmf optional $ciphers" ;;
     wpa3) echo "wifi-sec.key-mgmt sae wifi-sec.pmf required $ciphers" ;;
     *) return 1 ;;
   esac
@@ -179,12 +180,18 @@ profile_band() {
   band_from_nm "$(nm_get 802-11-wireless.band connection show "$PROFILE")"
 }
 
-# Anything but SAE reads as wpa2, including an older profile still in
-# transition mode; the next apply pins it.
+# wpa-psk only stays WPA2 when PMF is disabled; otherwise NetworkManager runs
+# it in transition mode. A missing profile reads as mixed, the default.
 profile_security() {
   case "$(nm_get 802-11-wireless-security.key-mgmt connection show "$PROFILE")" in
     sae) echo "wpa3" ;;
-    *) echo "wpa2" ;;
+    wpa-psk)
+      case "$(nm_get 802-11-wireless-security.pmf connection show "$PROFILE")" in
+        1 | disable) echo "wpa2" ;;
+        *) echo "mixed" ;;
+      esac
+      ;;
+    *) echo "mixed" ;;
   esac
 }
 
@@ -485,7 +492,7 @@ ensure_ipv4_forwarding() {
 
 # Password arrives on stdin (never argv). band is optional, default 2.4.
 # max is optional: "unlimited"/empty clears the participant limit, else 1-253.
-# security is optional: wpa2/wpa3, empty keeps the profile's (wpa2 when new).
+# security is optional: wpa2/mixed/wpa3, empty keeps the profile's (mixed when new).
 # apply() writes the profile; start() writes it the same way, then brings the AP up.
 start() {
   local ssid=$1 band=${2:-2.4} max=${3:-} security=${4:-}
@@ -581,7 +588,7 @@ apply() {
   old_security=$(profile_security)
   [[ -n $security ]] || security=$old_security
   read -ra security_args <<<"$(nm_security_args "$security")"
-  ((${#security_args[@]})) || fail "unknown security '$security' (use wpa2 or wpa3)"
+  ((${#security_args[@]})) || fail "unknown security '$security' (use wpa2, mixed or wpa3)"
   if [[ -n $max && $max != "unlimited" ]]; then
     new_range=$(dhcp_range_for "$max")
     base=$(shared_base)

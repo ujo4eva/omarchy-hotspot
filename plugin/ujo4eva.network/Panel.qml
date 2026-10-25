@@ -116,9 +116,10 @@ Panel {
   // AP band written by Apply / Start. Prefills from the saved profile so a
   // 5 GHz hotspot is not silently rewritten to 2.4 on the next apply.
   property string hotspotBand: "2.4"
-  // AP security written by Apply / Start: "wpa2" or "wpa3". Prefills from the
-  // saved profile so a WPA3 hotspot is not quietly downgraded on the next apply.
-  property string hotspotSecurity: "wpa2"
+  // AP security written by Apply / Start: "wpa2", "mixed" or "wpa3".
+  // Prefills from the saved profile so a choice is not quietly rewritten on
+  // the next apply.
+  property string hotspotSecurity: "mixed"
   property string hotspotError: ""
   property string hotspotEditingMac: ""
   property string hotspotAliasDraft: ""
@@ -1041,7 +1042,7 @@ Panel {
   }
 
   function setHotspotSecurity(security) {
-    if (hotspotBusy || (security !== "wpa2" && security !== "wpa3")) return
+    if (hotspotBusy || ["wpa2", "mixed", "wpa3"].indexOf(security) < 0) return
     hotspotSecurity = security
   }
 
@@ -2239,8 +2240,8 @@ text: root.hotspotPassword
             }
           }
 
-          // Key management, committed by Apply alongside the band. WPA2 keeps
-          // every client able to join; WPA3 is SAE only.
+          // Key management, committed by Apply alongside the band. WPA2/WPA3
+          // serves both; WPA2 and WPA3 pin one each.
           Item {
             width: parent.width
             implicitHeight: Math.max(hotspotSecurityLabel.implicitHeight, hotspotSecurityRow.implicitHeight)
@@ -2262,6 +2263,7 @@ text: root.hotspotPassword
               spacing: Style.space(6)
 
               HotspotSecurityPill { security: "wpa2" }
+              HotspotSecurityPill { security: "mixed" }
               HotspotSecurityPill { security: "wpa3" }
             }
           }
