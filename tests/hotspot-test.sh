@@ -125,15 +125,16 @@ fi
 printf 'PASS: hotspot start enables IPv4 forwarding\n'
 
 # NetworkManager adds SAE to a bare wpa-psk AP; the default must pin WPA2 by
-# disabling PMF, or SAE-fumbling clients never reach the AP.
-if ! grep -q 'connection modify .*wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable' "$STATE_DIR/nmcli-calls"; then
+# disabling PMF, or SAE-fumbling clients never reach the AP. Both modes pin
+# RSN/CCMP: an SAE-only AP will not start without them.
+if ! grep -q 'connection modify .*wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp' "$STATE_DIR/nmcli-calls"; then
   printf 'FAIL: hotspot start did not pin WPA2 (PSK, PMF disabled) by default\n' >&2
   exit 1
 fi
 printf 'sae\n' >"$STATE_DIR/key-mgmt"
 : >"$STATE_DIR/nmcli-calls"
 printf '%s\n' test-password | bash "$PLUGIN" apply TestHotspot 2.4 unlimited
-if ! grep -q 'connection modify .*wifi-sec.key-mgmt sae wifi-sec.pmf required' "$STATE_DIR/nmcli-calls"; then
+if ! grep -q 'connection modify .*wifi-sec.key-mgmt sae wifi-sec.pmf required wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp' "$STATE_DIR/nmcli-calls"; then
   printf 'FAIL: hotspot apply without a security argument dropped the saved WPA3\n' >&2
   exit 1
 fi
@@ -143,7 +144,7 @@ if ! XDG_RUNTIME_DIR="$STATE_DIR/runtime" bash "$PLUGIN" status | grep -qx $'sec
 fi
 : >"$STATE_DIR/nmcli-calls"
 printf '%s\n' test-password | bash "$PLUGIN" apply TestHotspot 2.4 unlimited wpa2
-if ! grep -q 'connection modify .*wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable' "$STATE_DIR/nmcli-calls"; then
+if ! grep -q 'connection modify .*wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp' "$STATE_DIR/nmcli-calls"; then
   printf 'FAIL: hotspot apply wpa2 did not switch the profile back to PSK\n' >&2
   exit 1
 fi

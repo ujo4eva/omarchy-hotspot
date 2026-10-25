@@ -45,11 +45,14 @@ band_from_nm() {
 # clients then upgrade to SAE, fail before associating, and never show up in
 # the AP's log. So the security is explicit: "wpa2" pins PSK by disabling PMF
 # (SAE cannot run without it); "wpa3" is SAE only, for owners whose devices
-# all support it.
+# all support it. Protocol and ciphers are pinned to RSN/CCMP: without them
+# wpa_supplicant's AP mode cannot build the beacon's RSN element for SAE alone
+# ("Could not generate WPA IE") and NetworkManager times out.
 nm_security_args() {
+  local ciphers="wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp"
   case "$1" in
-    wpa2) echo "wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable" ;;
-    wpa3) echo "wifi-sec.key-mgmt sae wifi-sec.pmf required" ;;
+    wpa2) echo "wifi-sec.key-mgmt wpa-psk wifi-sec.pmf disable $ciphers" ;;
+    wpa3) echo "wifi-sec.key-mgmt sae wifi-sec.pmf required $ciphers" ;;
     *) return 1 ;;
   esac
 }
