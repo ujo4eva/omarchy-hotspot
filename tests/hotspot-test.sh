@@ -52,7 +52,8 @@ nmcli() {
       cat "$STATE_DIR/pmf" 2>/dev/null || true
       ;;
     *" -g NAME connection show "*)
-      printf '%s\n' ujo4eva-hotspot
+      # MOCK_NO_PROFILE stands in for a machine that has never saved a hotspot.
+      [[ -n ${MOCK_NO_PROFILE:-} ]] || printf '%s\n' ujo4eva-hotspot
       ;;
     *" -g GENERAL.DEVICE connection show "*)
       printf '%s\n' wlo1
@@ -316,3 +317,30 @@ if [[ $capable != 1 ]]; then
   exit 1
 fi
 printf 'PASS: ap_capable survives iw phy output larger than a pipe buffer\n'
+
+# shared mode needs an address on the AP interface: without one NetworkManager
+# brings the radio up and then fails "IP configuration could not be reserved".
+: >"$STATE_DIR/nmcli-calls"
+printf '%s\n' test-password | MOCK_NO_PROFILE=1 bash "$PLUGIN" apply TestHotspot 2.4 unlimited
+if ! grep -q 'connection add .*ipv4.method shared ipv4.addresses 10.42.0.1/24' "$STATE_DIR/nmcli-calls"; then
+  printf 'FAIL: a new hotspot profile has no shared IPv4 address\n' >&2
+  exit 1
+fi
+printf 'PASS: a new hotspot profile gets the shared IPv4 address\n'
+
+# Without dnsmasq, shared mode can't hand out leases; start has to say so
+# instead of blaming the adapter. PATH keeps every binary except dnsmasq.
+no_dnsmasq="$STATE_DIR/no-dnsmasq-bin"
+mkdir -p "$no_dnsmasq"
+for binary in /usr/bin/*; do
+  [[ ${binary##*/} == "dnsmasq" ]] || ln -s "$binary" "$no_dnsmasq/${binary##*/}"
+done
+if output=$(printf '%s\n' test-password | PATH="$no_dnsmasq" MOCK_STATE_DIR="$STATE_DIR" bash "$PLUGIN" start TestHotspot 2.4 unlimited 2>&1); then
+  printf 'FAIL: hotspot start succeeded without dnsmasq\n' >&2
+  exit 1
+fi
+if [[ $output != *"dnsmasq is required"* ]]; then
+  printf 'FAIL: hotspot start without dnsmasq did not name it: %s\n' "$output" >&2
+  exit 1
+fi
+printf 'PASS: hotspot start without dnsmasq names the missing package\n'
