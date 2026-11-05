@@ -2545,18 +2545,47 @@ delegate: Item {
         width: parent.width
         implicitHeight: Math.max(participantLabel.implicitHeight, renameButton.height)
 
-        Text {
-          id: participantLabel
+        // Long labels (name + MAC + signal) ping-pong scroll instead of
+        // eliding, so the tail is readable. Labels that fit stay still.
+        Item {
+          id: participantLabelClip
           anchors.left: parent.left
           anchors.right: renameButton.left
           anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
-          textFormat: Text.PlainText
-          text: Model.hotspotClientLabel(participantRow.client)
-          color: Qt.darker(root.bar.foreground, 1.35)
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
+          height: participantLabel.implicitHeight
+          clip: true
+          readonly property real overflow: Math.max(0, participantLabel.implicitWidth - width)
+          readonly property int scrollMs: Math.max(1, Math.round(overflow / 30 * 1000))
+
+          Text {
+            id: participantLabel
+            textFormat: Text.PlainText
+            text: Model.hotspotClientLabel(participantRow.client)
+            color: Qt.darker(root.bar.foreground, 1.35)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          SequentialAnimation {
+            running: participantLabelClip.overflow > 0 && participantLabelClip.visible
+            loops: Animation.Infinite
+            onRunningChanged: if (!running) participantLabel.x = 0
+            PauseAnimation { duration: 1500 }
+            NumberAnimation {
+              target: participantLabel; property: "x"
+              from: 0; to: -participantLabelClip.overflow
+              duration: participantLabelClip.scrollMs
+              easing.type: Easing.InOutSine
+            }
+            PauseAnimation { duration: 1500 }
+            NumberAnimation {
+              target: participantLabel; property: "x"
+              from: -participantLabelClip.overflow; to: 0
+              duration: participantLabelClip.scrollMs
+              easing.type: Easing.InOutSine
+            }
+          }
         }
 
         Button {
