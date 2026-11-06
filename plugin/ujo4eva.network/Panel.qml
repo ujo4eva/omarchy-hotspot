@@ -166,6 +166,15 @@ Panel {
   // no internet — that is a warning, not a blocker.
   readonly property bool hotspotHasUpstream: hotspot.upstream !== "wifi" && hotspot.upstream !== "none" && hotspot.upstream !== ""
   readonly property var hotspotClients: Model.hotspotClients(hotspot)
+  // One clock for every scrolling participant label (Model.marqueeOffset), so
+  // a row rebuilt by a status poll resumes its scroll instead of restarting.
+  // Still while animations are off.
+  property real marqueeMs: 0
+  NumberAnimation on marqueeMs {
+    from: 0; to: 3600000; duration: 3600000
+    loops: Animation.Infinite
+    running: root.visible && root.hotspotClients.length > 0 && !Style.reduceMotion
+  }
   // Assigned in updateHotspot, not bound: hotspotBands() returns a new array
   // every call, and a binding on that identity would retrigger layout forever.
   property var hotspotAvailableBands: ["2.4", "5"]
@@ -2556,10 +2565,10 @@ delegate: Item {
           height: participantLabel.implicitHeight
           clip: true
           readonly property real overflow: Math.max(0, participantLabel.implicitWidth - width)
-          readonly property int scrollMs: Math.max(1, Math.round(overflow / 30 * 1000))
 
           Text {
             id: participantLabel
+            x: Style.reduceMotion ? 0 : Model.marqueeOffset(root.marqueeMs, participantLabelClip.overflow, 1500, 30)
             textFormat: Text.PlainText
             text: Model.hotspotClientLabel(participantRow.client)
             color: Qt.darker(root.bar.foreground, 1.35)
@@ -2567,25 +2576,6 @@ delegate: Item {
             font.pixelSize: Style.font.caption
           }
 
-          SequentialAnimation {
-            running: participantLabelClip.overflow > 0 && participantLabelClip.visible
-            loops: Animation.Infinite
-            onRunningChanged: if (!running) participantLabel.x = 0
-            PauseAnimation { duration: 1500 }
-            NumberAnimation {
-              target: participantLabel; property: "x"
-              from: 0; to: -participantLabelClip.overflow
-              duration: participantLabelClip.scrollMs
-              easing.type: Easing.InOutSine
-            }
-            PauseAnimation { duration: 1500 }
-            NumberAnimation {
-              target: participantLabel; property: "x"
-              from: -participantLabelClip.overflow; to: 0
-              duration: participantLabelClip.scrollMs
-              easing.type: Easing.InOutSine
-            }
-          }
         }
 
         Button {

@@ -658,8 +658,30 @@ function parseHotspotQr(raw) {
   return { meta: meta, matrix: matrix.rows, size: matrix.size }
 }
 
+// Where a scrolling label sits `ms` into the shared marquee clock: it rests,
+// eases to its end (`overflow` px), rests, and eases back. Computing it from
+// one clock, not a per-row animation, lets a row rebuilt by a status poll pick
+// up where it was instead of restarting.
+function marqueeOffset(ms, overflow, pauseMs, pxPerSecond) {
+  var o = Math.max(0, Number(overflow) || 0)
+  if (o === 0) return 0
+  var pause = Math.max(0, Number(pauseMs) || 0)
+  var scroll = Math.max(1, o / Math.max(1, Number(pxPerSecond) || 30) * 1000)
+  var period = 2 * (pause + scroll)
+  var t = ((Number(ms) || 0) % period + period) % period
+  function ease(p) { return 1 - Math.pow(1 - p, 3) }
+  if (t < pause) return 0
+  t -= pause
+  if (t < scroll) return -o * ease(t / scroll)
+  t -= scroll
+  if (t < pause) return -o
+  t -= pause
+  return -o * (1 - ease(t / scroll))
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
+    marqueeOffset: marqueeOffset,
     hotspotIcon: hotspotIcon,
     parseIwScanDump: parseIwScanDump,
     hotspotSsids: hotspotSsids,

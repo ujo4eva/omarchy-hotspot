@@ -218,6 +218,19 @@ if (hotspotSecurity({ security: "wpa3" }) !== "wpa3" || hotspotSecurity({ securi
 }
 ' "${PLUGIN%/*}/Model.js"
 printf 'PASS: hotspot security defaults to mixed, reads and keeps the saved mode, and switches live\n'
+node -e '
+const fs = require("fs")
+const vm = require("vm")
+vm.runInThisContext(fs.readFileSync(process.argv[1], "utf8"))
+// 60px at 30px/s scrolls for 2s, with 1.5s rests: rest, scroll out, rest, scroll back.
+const at = ms => marqueeOffset(ms, 60, 1500, 30)
+if (at(0) !== 0 || at(1499) !== 0 || at(3500) !== -60 || at(4999) !== -60 || at(7000) !== 0 || at(7000 + 3500) !== -60 ||
+    !(at(2500) < 0 && at(2500) > -60) || marqueeOffset(5000, 0, 1500, 30) !== 0) {
+  process.stderr.write("FAIL: marqueeOffset did not rest, scroll and return on its period\n")
+  process.exit(1)
+}
+' "${PLUGIN%/*}/Model.js"
+printf 'PASS: long participant labels scroll on one shared clock\n'
 
 status_output=$(XDG_RUNTIME_DIR="$STATE_DIR/runtime" bash "$PLUGIN" status)
 node -e '
