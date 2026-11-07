@@ -26,10 +26,13 @@ cd omarchy-hotspot
 
 The installer:
 
-1. copies the `ujo4eva.network` plugin to `~/.config/omarchy/plugins/`
-2. adds the Wi-Fi Hotspot rows to `~/.config/omarchy/extensions/omarchy-menu.jsonc`,
+1. opens the firewall for hotspot DHCP, DNS and forwarding when `ufw` is
+   installed, and adds a policy rule that keeps hotspot traffic out of
+   full-tunnel VPNs such as Cloudflare WARP
+2. copies the `ujo4eva.network` plugin to `~/.config/omarchy/plugins/`
+3. adds the Wi-Fi Hotspot rows to `~/.config/omarchy/extensions/omarchy-menu.jsonc`,
    between `// >>> omarchy-hotspot` markers
-3. swaps the stock network widget for this one in `~/.config/omarchy/shell.json`
+4. swaps the stock network widget for this one in `~/.config/omarchy/shell.json`
    (it saves the old file as `shell.json.bak-omarchy-hotspot`)
 
 It installs `iw` with pacman if it's missing. You can run it again to update:
@@ -37,6 +40,17 @@ It installs `iw` with pacman if it's missing. You can run it again to update:
 ```bash
 git pull && ./install.sh
 ```
+
+NetworkManager's shared mode runs DHCP and NATs, but a firewall with a
+default-deny forward policy (`ufw`) drops the clients, and ufw has a built-in
+rule that sends DHCP (port 67) straight to its policy. A full-tunnel VPN also
+routes forwarded client packets into its tunnel. The installer opens exactly
+the ports the hotspot needs, scoped to the hotspot interface and client subnet,
+and adds the routing rule the VPN would otherwise swallow. Re-run it if you
+change the Wi-Fi interface.
+
+The firewall rules and the routing unit are installed for everyone, whether or
+not you use a VPN, and installing asks for sudo to add them.
 
 ## Use
 

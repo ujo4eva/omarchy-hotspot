@@ -7,6 +7,9 @@ PLUGIN_DIR="$OMARCHY_CONFIG/plugins/$PLUGIN_ID"
 MENU_FILE="$OMARCHY_CONFIG/extensions/omarchy-menu.jsonc"
 SHELL_JSON="$OMARCHY_CONFIG/shell.json"
 BACKUP_ROOT="$OMARCHY_CONFIG/backups/omarchy-hotspot"
+WARP_UNIT="hotspot-warp-bypass.service"
+SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
+UFW_COMMENT="omarchy-hotspot-installer"
 BLOCK_BEGIN="// >>> omarchy-hotspot"
 BLOCK_END="// <<< omarchy-hotspot"
 
@@ -66,4 +69,76 @@ swap_bar_widget() {
     "$SHELL_JSON" >"$tmp"
   cat "$tmp" >"$SHELL_JSON"
   rm -f "$tmp"
+}
+
+# The Wi-Fi interface the hotspot uses. Ask the plugin so the installer and the
+# panel cannot drift apart on which device they mean.
+hotspot_iface() {
+  local plugin="$REPO/plugin/$PLUGIN_ID/hotspot.sh"
+  [[ -f $plugin ]] || return 0
+  bash "$plugin" iface 2>/dev/null || true
+}
+
+# The hotspot's own address on the shared /24; NetworkManager's default is
+# 10.42.0.1 when no profile has configured one yet.
+hotspot_gateway() {
+  local addr
+  addr=$(nmcli -g ipv4.addresses connection show "$PROFILE" 2>/dev/null | head -n 1 || true)
+  addr=${addr%% *}
+  if [[ -n $addr ]]; then
+    printf '%s' "${addr%%/*}"
+  else
+    printf '10.42.0.1'
+  fi
+}
+
+# The shared /24 the hotspot hands out, derived from its gateway address.
+hotspot_subnet() {
+  local gateway
+  gateway=$(hotspot_gateway)
+  printf '%s.0/24' "${gateway%.*}"
+}
+
+# The interface and subnet recorded in the unit a previous install wrote, so a
+# re-install can clean up after an interface or address change.
+installed_unit_scope() {
+  local unit="$SYSTEMD_DIR/$WARP_UNIT"
+  [[ -r $unit ]] || return 0
+  sed -n 's/^# omarchy-hotspot-scope: iface=\([^ ]*\) subnet=\([^ ]*\)$/\1 \2/p' "$unit" |
+    head -n 1
+}
+
+# Rules this installer owns carry UFW_COMMENT, so uninstall deletes only what
+# it added and never an identical rule the user added by hand. Print the rule
+# for a tag one argument per line, so add and delete always use the same spec.
+hotspot_ufw_rule() {
+  local tag=$1 iface=$2 subnet=$3
+  case $tag in
+    dhcp) printf '%s\n' allow in on "$iface" from any to any port 67 proto udp ;;
+    dns-udp) printf '%s\n' allow in on "$iface" from "$subnet" to any port 53 proto udp ;;
+    dns-tcp) printf '%s\n' allow in on "$iface" from "$subnet" to any port 53 proto tcp ;;
+    forward) printf '%s\n' route allow in on "$iface" from "$subnet" ;;
+  esac
+}
+
+hotspot_ufw_add_all() {
+  local iface=$1 subnet=$2 tag spec
+  for tag in dhcp dns-udp dns-tcp forward; do
+    mapfile -t spec < <(hotspot_ufw_rule "$tag" "$iface" "$subnet")
+    sudo ufw "${spec[@]}" comment "$UFW_COMMENT" >/dev/null ||
+      warn "ufw: couldn't add the $tag rule for $iface"
+  done
+}
+
+hotspot_ufw_delete_all() {
+  local iface=$1 subnet=$2 tag spec
+  [[ -n $subnet ]] || return 0
+  for tag in dhcp dns-udp dns-tcp forward; do
+    mapfile -t spec < <(hotspot_ufw_rule "$tag" "$iface" "$subnet")
+    if [[ $tag == forward ]]; then
+      sudo ufw --force route delete "${spec[@]:1}" comment "$UFW_COMMENT" >/dev/null 2>&1 || true
+    else
+      sudo ufw --force delete "${spec[@]}" comment "$UFW_COMMENT" >/dev/null 2>&1 || true
+    fi
+  done
 }

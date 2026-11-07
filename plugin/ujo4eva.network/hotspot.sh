@@ -776,6 +776,8 @@ usage() {
 }
 
 case "${1:-}" in
+# Internal: the installer asks for the interface the hotspot will use.
+  iface) ap_iface ;;
   status) status ;;
   start) shift; start "$@" ;;
   stop) stop ;;
